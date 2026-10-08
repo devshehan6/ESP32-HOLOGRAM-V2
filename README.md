@@ -10,9 +10,9 @@ A complete ESP32-based hologram / LED pattern controller driven by two cascaded 
 
 | Page | Purpose | Link |
 |---|---|---|
-| 🏠 **Connect** | Enter the ESP32 IP address to log in | [Open ↗](https://devshehan6.github.io/ESP32-HOLOGRAM-V2/index.html) |
-| 🧪 **Test Panel** | Test bulbs one-by-one and pass LED count to Frame editor | [Open ↗](https://devshehan6.github.io/ESP32-HOLOGRAM-V2/test.html) |
-| 🎬 **Frame Editor** | Build frame patterns, set delays, send to ESP32 | [Open ↗](https://devshehan6.github.io/ESP32-HOLOGRAM-V2/frame.html) |
+| 🏠 **Connect** | Enter the ESP32 IP address to log in | [index.html](https://devshehan6.github.io/ESP32-HOLOGRAM-V2/index.html) |
+| 🧪 **Test Panel** | Test bulbs one-by-one and pass LED count to Frame editor | [test.html](https://devshehan6.github.io/ESP32-HOLOGRAM-V2/test.html) |
+| 🎬 **Frame Editor** | Build frame patterns, set delays, send to ESP32 | [frame.html](https://devshehan6.github.io/ESP32-HOLOGRAM-V2/frame.html) |
 
 👉 **Start here:** [Open the Connect page](https://devshehan6.github.io/ESP32-HOLOGRAM-V2/index.html)
 
