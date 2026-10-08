@@ -44,29 +44,27 @@
     gap: 8px;
     flex-wrap: wrap;
   }
-  .topbar label { font-size: .8rem; color: var(--muted); }
+  .topbar label { font-size: .78rem; color: var(--muted); }
   .topbar input[type="number"] {
-    width: 110px;
-    padding: 8px 10px;
+    width: 90px;
+    padding: 7px 9px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 8px;
     color: var(--text);
     font-family: ui-monospace, monospace;
-    font-size: .95rem;
+    font-size: .88rem;
   }
   .topbar select {
-    padding: 8px 10px;
+    padding: 7px 8px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 8px;
     color: var(--text);
-    font-size: .9rem;
+    font-size: .82rem;
   }
-  .topbar .hint { color: var(--muted); font-size: .72rem; }
   .topbar .spacer { flex: 1; }
 
-  /* Online bulb pill */
   .status-pill {
     display: inline-flex;
     align-items: center;
@@ -97,7 +95,7 @@
   .wrap {
     max-width: 1100px;
     margin: 0 auto;
-    padding: 100px 12px 210px;
+    padding: 110px 12px 210px;
   }
 
   .frame-title {
@@ -155,7 +153,6 @@
     color: #ff9aa6;
   }
 
-  /* ---------- Single-row horizontal LED strip ---------- */
   .strip-scroll {
     overflow-x: auto;
     overflow-y: hidden;
@@ -307,16 +304,22 @@
 </head>
 <body>
 
-  <!-- Fixed top: delay + online bulb -->
+  <!-- Fixed top: frame delay + start delay + online bulb -->
   <div class="topbar">
     <div class="topbar-inner">
-      <label for="delayInput">Delay</label>
+      <label for="delayInput">Frame&nbsp;Delay</label>
       <input id="delayInput" type="number" min="0" step="any" value="100" />
       <select id="delayUnit">
-        <option value="ms" selected>milliseconds</option>
-        <option value="s">seconds</option>
+        <option value="ms" selected>ms</option>
+        <option value="s">s</option>
       </select>
-      <span class="hint">(ms to ESP)</span>
+
+      <label for="startDelayInput" style="margin-left:6px;">Start&nbsp;Delay</label>
+      <input id="startDelayInput" type="number" min="0" step="any" value="0" />
+      <select id="startDelayUnit">
+        <option value="ms" selected>ms</option>
+        <option value="s">s</option>
+      </select>
 
       <span class="spacer"></span>
 
@@ -377,6 +380,8 @@ const DB_KEY       = "shiftReg_frameDB";
 let ledCount = 0;
 let delayValue = 100;
 let delayUnit = "ms";
+let startDelayValue = 0;
+let startDelayUnit = "ms";
 let frames = [];
 let currentFrame = 0;
 
@@ -385,6 +390,8 @@ const ip = localStorage.getItem(IP_KEY) || "";
 // ---------- DOM ----------
 const delayInput   = document.getElementById("delayInput");
 const delayUnitEl  = document.getElementById("delayUnit");
+const startDelayInput  = document.getElementById("startDelayInput");
+const startDelayUnitEl = document.getElementById("startDelayUnit");
 const linesBox     = document.getElementById("linesContainer");
 const frameTitle   = document.getElementById("frameTitle");
 const ledCountOut  = document.getElementById("ledCountOut");
@@ -418,12 +425,15 @@ function saveDB() {
   const db = {
     delayValue: delayValue,
     delayUnit: delayUnit,
+    startDelayValue: startDelayValue,
+    startDelayUnit: startDelayUnit,
     ledCount: ledCount,
     currentFrame: currentFrame,
     frames: frames
   };
   localStorage.setItem(DB_KEY, JSON.stringify(db));
 }
+
 function loadDB() {
   const raw = localStorage.getItem(DB_KEY);
   if (!raw) return null;
@@ -549,7 +559,7 @@ function gotoFrame(i) {
   render();
 }
 
-// ---------- Delay ----------
+// ---------- Delay inputs ----------
 delayInput.addEventListener("input", () => {
   const v = parseFloat(delayInput.value);
   delayValue = isNaN(v) || v < 0 ? 0 : v;
@@ -559,37 +569,54 @@ delayUnitEl.addEventListener("change", () => {
   delayUnit = delayUnitEl.value;
   saveDB();
 });
+
+startDelayInput.addEventListener("input", () => {
+  const v = parseFloat(startDelayInput.value);
+  startDelayValue = isNaN(v) || v < 0 ? 0 : v;
+  saveDB();
+});
+startDelayUnitEl.addEventListener("change", () => {
+  startDelayUnit = startDelayUnitEl.value;
+  saveDB();
+});
+
 function delayInMs() {
   if (delayUnit === "s") return Math.round(delayValue * 1000);
   return Math.round(delayValue);
 }
+function startDelayInMs() {
+  if (startDelayUnit === "s") return Math.round(startDelayValue * 1000);
+  return Math.round(startDelayValue);
+}
 
-// ---------- Send ONLY the selected frame ----------
+// ---------- Send ----------
 async function sendToEsp() {
   if (!ip) { setStatus("No device IP configured.", "err"); return; }
   if (!frames[currentFrame]) { setStatus("No frame selected.", "err"); return; }
 
   const ms = delayInMs();
+  const sd = startDelayInMs();
   const frame = frames[currentFrame];
 
   const payload = JSON.stringify({
     delay: ms,
+    startDelay: sd,
     lines: frame.map(line => line.join(""))
   });
 
-  setStatus(`Sending frame ${currentFrame + 1} (${frame.length} line(s))...`);
+  setStatus(`Sending frame ${currentFrame + 1} (${frame.length} line(s), start delay ${sd} ms)...`);
   try {
     const res = await fetch(`http://${ip}/frames`, {
       method: "POST",
-      headers: { "Content-Type": "text/plain" },   // <-- avoids CORS preflight
+      headers: { "Content-Type": "text/plain" },
       body: payload
     });
     if (!res.ok) {
-      const errText = await res.text();
-      throw new Error("HTTP " + res.status + " " + errText);
+      const t = await res.text();
+      throw new Error("HTTP " + res.status + " " + t);
     }
     const data = await res.json();
-    setStatus(`Sent frame ${currentFrame + 1} • ${data.lines} line(s) • delay ${ms} ms`, "ok");
+    setStatus(`Armed! Waiting for IR • frame delay ${data.delay} ms • start delay ${data.startDelay} ms`, "ok");
     setOnline(true);
   } catch (e) {
     setStatus("Send failed: " + e.message, "err");
@@ -685,6 +712,8 @@ document.getElementById("exportBtn").addEventListener("click", () => {
   const db = {
     delayValue: delayValue,
     delayUnit: delayUnit,
+    startDelayValue: startDelayValue,
+    startDelayUnit: startDelayUnit,
     ledCount: ledCount,
     currentFrame: currentFrame,
     frames: frames
@@ -722,9 +751,13 @@ fileInput.addEventListener("change", () => {
       currentFrame = Math.min(Math.max(0, db.currentFrame || 0), frames.length - 1);
       delayValue = typeof db.delayValue === "number" ? db.delayValue : delayValue;
       delayUnit = db.delayUnit === "s" ? "s" : "ms";
+      startDelayValue = typeof db.startDelayValue === "number" ? db.startDelayValue : 0;
+      startDelayUnit = db.startDelayUnit === "s" ? "s" : "ms";
 
       delayInput.value = delayValue;
       delayUnitEl.value = delayUnit;
+      startDelayInput.value = startDelayValue;
+      startDelayUnitEl.value = startDelayUnit;
 
       saveDB(); render();
       setStatus("Imported.", "ok");
@@ -752,15 +785,21 @@ fileInput.addEventListener("change", () => {
     currentFrame = Math.min(Math.max(0, db.currentFrame || 0), frames.length - 1);
     delayValue = typeof db.delayValue === "number" ? db.delayValue : 100;
     delayUnit = db.delayUnit === "s" ? "s" : "ms";
+    startDelayValue = typeof db.startDelayValue === "number" ? db.startDelayValue : 0;
+    startDelayUnit = db.startDelayUnit === "s" ? "s" : "ms";
   } else {
     frames = [ newFrame() ];
     currentFrame = 0;
     delayValue = 100;
     delayUnit = "ms";
+    startDelayValue = 0;
+    startDelayUnit = "ms";
   }
 
   delayInput.value = delayValue;
   delayUnitEl.value = delayUnit;
+  startDelayInput.value = startDelayValue;
+  startDelayUnitEl.value = startDelayUnit;
 
   saveDB();
   render();
