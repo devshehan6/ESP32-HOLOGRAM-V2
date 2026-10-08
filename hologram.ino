@@ -5,6 +5,11 @@
 const char* WIFI_SSID = "DESKTOP-5J8MM72 4221_";
 const char* WIFI_PASS = "11111113";
 
+// ---------- Built-in LED ----------
+// Most ESP32 dev boards use GPIO 2 for the on-board LED.
+// If yours is different (some use GPIO 5, 15, etc.), change this.
+#define LED_BUILTIN_PIN 2
+
 // ---------- 74HC595 Pins ----------
 #define DATA_PIN   0
 #define CLOCK_PIN  1
@@ -12,22 +17,54 @@ const char* WIFI_PASS = "11111113";
 
 WebServer server(80);
 
-// ---------- Frame storage ----------
-// Each frame: up to 8 lines of 16-bit values + delay in ms
-#define MAX_FRAMES      32
-#define MAX_LINES       32
+#define MAX_LINES 64
+uint16_t lines[MAX_LINES];
+uint16_t lineCount  = 0;
+uint32_t frameDelay = 100;
+bool     playing    = false;
+uint32_t lastStep   = 0;
+uint16_t playIndex  = 0;
 
-struct Frame {
-  uint16_t lines[MAX_LINES];
-  uint8_t  lineCount;
-  uint32_t delayMs;
-};
+String postBody = "";
 
-Frame    frames[MAX_FRAMES];
-uint16_t frameCount    = 0;
-bool     playing       = false;
-uint32_t lastFrameTime = 0;
-uint16_t playIndex     = 0;
+// ---------- WiFi LED state machine ----------
+enum WifiLedState { WIFI_LED_CONNECTING, WIFI_LED_ONLINE, WIFI_LED_OFFLINE };
+WifiLedState wifiLedState = WIFI_LED_CONNECTING;
+uint32_t     wifiLedTimer = 0;
+bool         wifiLedOn    = false;
+
+void updateWifiLed() {
+  uint32_t now = millis();
+
+  // Detect current WiFi status
+  bool connected = (WiFi.status() == WL_CONNECTED);
+
+  if (connected) {
+    if (wifiLedState != WIFI_LED_ONLINE) {
+      wifiLedState = WIFI_LED_ONLINE;
+      digitalWrite(LED_BUILTIN_PIN, HIGH);   // Solid ON
+      wifiLedOn = true;
+    }
+    return;
+  }
+
+  // Not connected
+  if (wifiLedState == WIFI_LED_ONLINE) {
+    // Just dropped
+    wifiLedState = WIFI_LED_OFFLINE;
+    digitalWrite(LED_BUILTIN_PIN, LOW);
+    wifiLedOn = false;
+    wifiLedTimer = now;
+    return;
+  }
+
+  // Connecting → blink slowly (500 ms on/off)
+  if (now - wifiLedTimer >= 500) {
+    wifiLedTimer = now;
+    wifiLedOn = !wifiLedOn;
+    digitalWrite(LED_BUILTIN_PIN, wifiLedOn ? HIGH : LOW);
+  }
+}
 
 // ---------- Shift register ----------
 void writeShiftRegister(uint16_t data) {
@@ -44,137 +81,86 @@ void sendCORSHeaders() {
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-// ---------- /ping ----------
+void handleBody() {
+  if (server.hasArg("plain")) postBody = server.arg("plain");
+  else postBody = "";
+}
+
 void handlePing() {
   sendCORSHeaders();
   server.send(200, "application/json", "{\"ok\":1}");
 }
 
-// ---------- /frames : receive JSON payload ----------
-// Expected JSON:
-// {
-//   "delay": 100,
-//   "frames": [
-//     { "lines": ["00000000","11111111"], "delay": 100 },
-//     { "lines": ["10101010"], "delay": 200 }
-//   ]
-// }
+// ---------- /frames ----------
 void handleFrames() {
   sendCORSHeaders();
 
-  if (!server.hasArg("plain")) {
-    server.send(400, "application/json", "{\"error\":\"no body\"}");
-    return;
-  }
-
-  String body = server.arg("plain");
-  Serial.println("Received frames payload:");
+  String body = server.hasArg("plain") ? server.arg("plain") : postBody;
+  Serial.print("Body length: ");
+  Serial.println(body.length());
   Serial.println(body);
 
-  // --- Minimal JSON parsing (no external library) ---
-  // Find "delay":
-  int delayKey = body.indexOf("\"delay\"");
-  long globalDelay = 100;
-  if (delayKey >= 0) {
-    int colon = body.indexOf(':', delayKey);
-    if (colon > 0) {
-      globalDelay = body.substring(colon + 1).toInt();
-      if (globalDelay <= 0) globalDelay = 100;
-    }
-  }
-
-  // Parse frames array
-  frameCount = 0;
-  int framesKey = body.indexOf("\"frames\"");
-  if (framesKey < 0) {
-    server.send(400, "application/json", "{\"error\":\"no frames\"}");
+  if (body.length() == 0) {
+    server.send(400, "application/json", "{\"error\":\"empty body\"}");
     return;
   }
 
-  int arrStart = body.indexOf('[', framesKey);
-  if (arrStart < 0) {
-    server.send(400, "application/json", "{\"error\":\"bad frames\"}");
+  long d = 100;
+  int dk = body.indexOf("\"delay\"");
+  if (dk >= 0) {
+    int c = body.indexOf(':', dk);
+    if (c > 0) {
+      d = body.substring(c + 1).toInt();
+      if (d <= 0) d = 100;
+    }
+  }
+  frameDelay = (uint32_t)d;
+
+  lineCount = 0;
+  int lk = body.indexOf("\"lines\"");
+  if (lk < 0) {
+    server.send(400, "application/json", "{\"error\":\"no lines key\"}");
+    return;
+  }
+  int la = body.indexOf('[', lk);
+  int le = body.indexOf(']', la);
+  if (la < 0 || le < 0) {
+    server.send(400, "application/json", "{\"error\":\"bad lines array\"}");
     return;
   }
 
-  int pos = arrStart + 1;
-  while (pos < body.length() && frameCount < MAX_FRAMES) {
-    int objStart = body.indexOf('{', pos);
-    if (objStart < 0) break;
-    int objEnd = body.indexOf('}', objStart);
-    if (objEnd < 0) break;
+  String arr = body.substring(la + 1, le);
+  int p = 0;
+  while (p < (int)arr.length() && lineCount < MAX_LINES) {
+    int q1 = arr.indexOf('"', p);
+    if (q1 < 0) break;
+    int q2 = arr.indexOf('"', q1 + 1);
+    if (q2 < 0) break;
 
-    String obj = body.substring(objStart + 1, objEnd);
+    String bits = arr.substring(q1 + 1, q2);
+    bits.trim();
 
-    // per-frame delay
-    uint32_t frameDelay = globalDelay;
-    int dk = obj.indexOf("\"delay\"");
-    if (dk >= 0) {
-      int c = obj.indexOf(':', dk);
-      if (c > 0) {
-        long v = obj.substring(c + 1).toInt();
-        if (v > 0) frameDelay = (uint32_t)v;
-      }
+    uint16_t val = 0;
+    for (int i = 0; i < (int)bits.length() && i < 16; i++) {
+      val <<= 1;
+      if (bits[i] == '1') val |= 1;
     }
-
-    // lines array
-    int linesKey = obj.indexOf("\"lines\"");
-    if (linesKey >= 0) {
-      int la = obj.indexOf('[', linesKey);
-      int le = obj.indexOf(']', la);
-      if (la > 0 && le > la) {
-        String linesStr = obj.substring(la + 1, le);
-
-        uint8_t lc = 0;
-        int p = 0;
-        while (p < linesStr.length() && lc < MAX_LINES) {
-          int q1 = linesStr.indexOf('"', p);
-          if (q1 < 0) break;
-          int q2 = linesStr.indexOf('"', q1 + 1);
-          if (q2 < 0) break;
-
-          String bits = linesStr.substring(q1 + 1, q2);
-          bits.trim();
-
-          // Convert binary string -> uint16_t
-          uint16_t val = 0;
-          for (int i = 0; i < bits.length() && i < 16; i++) {
-            val <<= 1;
-            if (bits[i] == '1') val |= 1;
-          }
-          frames[frameCount].lines[lc++] = val;
-          p = q2 + 1;
-        }
-        frames[frameCount].lineCount = lc;
-      }
-    }
-
-    frames[frameCount].delayMs = frameDelay;
-    frameCount++;
-
-    pos = objEnd + 1;
-    int nextObj = body.indexOf('{', pos);
-    int arrEnd  = body.indexOf(']', pos);
-    if (arrEnd >= 0 && (nextObj < 0 || nextObj > arrEnd)) break;
+    lines[lineCount++] = val;
+    p = q2 + 1;
   }
 
-  Serial.print("Parsed frames: ");
-  Serial.println(frameCount);
+  Serial.print("Lines parsed: ");
+  Serial.println(lineCount);
 
-  // Start playback
-  playIndex     = 0;
-  lastFrameTime = millis();
-  playing       = (frameCount > 0);
+  playIndex = 0;
+  lastStep  = millis();
+  playing   = (lineCount > 0);
+  if (playing) writeShiftRegister(lines[0]);
 
-  if (playing) {
-    writeShiftRegister(frames[0].lines[0]);
-  }
-
-  String resp = "{\"ok\":1,\"frames\":" + String(frameCount) + "}";
+  String resp = "{\"ok\":1,\"lines\":" + String(lineCount) + ",\"delay\":" + String(frameDelay) + "}";
   server.send(200, "application/json", resp);
 }
 
-// ---------- /stop ----------
 void handleStop() {
   sendCORSHeaders();
   playing = false;
@@ -187,10 +173,12 @@ void handleOptions() {
   server.send(204);
 }
 
-// ---------- Setup ----------
 void setup() {
   Serial.begin(115200);
   delay(100);
+
+  pinMode(LED_BUILTIN_PIN, OUTPUT);
+  digitalWrite(LED_BUILTIN_PIN, LOW);
 
   pinMode(DATA_PIN, OUTPUT);
   pinMode(CLOCK_PIN, OUTPUT);
@@ -198,19 +186,35 @@ void setup() {
   writeShiftRegister(0);
 
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+
   Serial.print("Connecting to WiFi");
+  // Blink the built-in LED while connecting
+  uint32_t blinkTimer = millis();
+  bool blinkOn = false;
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    if (millis() - blinkTimer >= 250) {
+      blinkTimer = millis();
+      blinkOn = !blinkOn;
+      digitalWrite(LED_BUILTIN_PIN, blinkOn ? HIGH : LOW);
+    }
+    delay(10);
     Serial.print(".");
   }
   Serial.println();
-  Serial.print("Device IP: ");
+
+  // Connected → solid ON
+  digitalWrite(LED_BUILTIN_PIN, HIGH);
+  wifiLedState = WIFI_LED_ONLINE;
+
+  Serial.print("Connected! Device IP: ");
   Serial.println(WiFi.localIP());
 
   server.on("/ping",   HTTP_GET,     handlePing);
-  server.on("/frames", HTTP_POST,    handleFrames);
+  server.on("/frames", HTTP_POST,    handleFrames, handleBody);
   server.on("/stop",   HTTP_GET,     handleStop);
+
   server.on("/ping",   HTTP_OPTIONS, handleOptions);
   server.on("/frames", HTTP_OPTIONS, handleOptions);
   server.on("/stop",   HTTP_OPTIONS, handleOptions);
@@ -219,27 +223,17 @@ void setup() {
   Serial.println("HTTP server started on port 80");
 }
 
-// ---------- Loop ----------
 void loop() {
   server.handleClient();
+  updateWifiLed();     // Reflect WiFi state on the built-in LED
 
-  if (playing && frameCount > 0) {
+  if (playing && lineCount > 0) {
     uint32_t now = millis();
-    Frame &f = frames[playIndex];
-
-    // Walk through this frame's lines using its delay
-    static uint8_t lineIdx = 0;
-    if (now - lastFrameTime >= f.delayMs) {
-      lastFrameTime = now;
-      lineIdx++;
-      if (lineIdx >= f.lineCount) {
-        lineIdx = 0;
-        playIndex++;
-        if (playIndex >= frameCount) playIndex = 0;
-      }
-      if (frames[playIndex].lineCount > 0) {
-        writeShiftRegister(frames[playIndex].lines[lineIdx]);
-      }
+    if (now - lastStep >= frameDelay) {
+      lastStep = now;
+      playIndex++;
+      if (playIndex >= lineCount) playIndex = 0;
+      writeShiftRegister(lines[playIndex]);
     }
   }
 }

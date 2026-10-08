@@ -27,7 +27,7 @@
     padding: 0;
   }
 
-  /* ---------- Fixed top bar: delay ---------- */
+  /* ---------- Fixed top bar ---------- */
   .topbar {
     position: fixed;
     top: 0; left: 0; right: 0;
@@ -46,7 +46,7 @@
   }
   .topbar label { font-size: .8rem; color: var(--muted); }
   .topbar input[type="number"] {
-    width: 120px;
+    width: 110px;
     padding: 8px 10px;
     background: var(--card);
     border: 1px solid var(--border);
@@ -64,12 +64,40 @@
     font-size: .9rem;
   }
   .topbar .hint { color: var(--muted); font-size: .72rem; }
+  .topbar .spacer { flex: 1; }
+
+  /* Online bulb pill */
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    font-size: .78rem;
+    user-select: none;
+  }
+  .bulb {
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    background: #555;
+    transition: background .2s, box-shadow .2s;
+  }
+  .bulb.online {
+    background: var(--accent-2);
+    box-shadow: 0 0 10px 2px rgba(34,197,94,.55);
+  }
+  .bulb.offline {
+    background: var(--danger);
+    box-shadow: 0 0 10px 2px rgba(239,68,68,.45);
+  }
 
   /* ---------- Content ---------- */
   .wrap {
     max-width: 1100px;
     margin: 0 auto;
-    padding: 90px 12px 190px;
+    padding: 100px 12px 210px;
   }
 
   .frame-title {
@@ -279,7 +307,7 @@
 </head>
 <body>
 
-  <!-- Fixed top: delay -->
+  <!-- Fixed top: delay + online bulb -->
   <div class="topbar">
     <div class="topbar-inner">
       <label for="delayInput">Delay</label>
@@ -288,7 +316,14 @@
         <option value="ms" selected>milliseconds</option>
         <option value="s">seconds</option>
       </select>
-      <span class="hint">(sent to ESP as ms)</span>
+      <span class="hint">(ms to ESP)</span>
+
+      <span class="spacer"></span>
+
+      <div class="status-pill" id="onlinePill" title="ESP32 online status">
+        <span class="bulb" id="bulb"></span>
+        <span id="onlineText">Checking…</span>
+      </div>
     </div>
   </div>
 
@@ -316,6 +351,7 @@
 
       <div class="actions">
         <button class="btn primary" id="sendBtn">Send</button>
+        <button class="btn danger"  id="stopBtn">Stop</button>
         <button class="btn" id="exportBtn">Export</button>
         <button class="btn" id="importBtn">Import</button>
         <button class="btn" id="addFrameBtn">Add Frame</button>
@@ -340,8 +376,8 @@ const DB_KEY       = "shiftReg_frameDB";
 // ---------- State ----------
 let ledCount = 0;
 let delayValue = 100;
-let delayUnit = "ms";        // "ms" | "s"
-let frames = [];             // [ [ [0/1,...], ... ], ... ]
+let delayUnit = "ms";
+let frames = [];
 let currentFrame = 0;
 
 const ip = localStorage.getItem(IP_KEY) || "";
@@ -357,13 +393,15 @@ const frameCountOut= document.getElementById("frameCountOut");
 const pager        = document.getElementById("pager");
 const statusEl     = document.getElementById("status");
 const fileInput    = document.getElementById("fileInput");
+const bulb         = document.getElementById("bulb");
+const onlineText   = document.getElementById("onlineText");
 
 function setStatus(msg, cls = "") {
   statusEl.textContent = msg;
   statusEl.className = "status " + cls;
 }
 
-// ---------- LED count from URL / storage ----------
+// ---------- LED count ----------
 function getLedCount() {
   const params = new URLSearchParams(location.search);
   const url = parseInt(params.get("leds") || "", 10);
@@ -386,7 +424,6 @@ function saveDB() {
   };
   localStorage.setItem(DB_KEY, JSON.stringify(db));
 }
-
 function loadDB() {
   const raw = localStorage.getItem(DB_KEY);
   if (!raw) return null;
@@ -421,7 +458,6 @@ function render() {
     const card = document.createElement("div");
     card.className = "line-card";
 
-    // Header with index + row actions
     const head = document.createElement("div");
     head.className = "line-head";
     head.innerHTML = `
@@ -435,7 +471,6 @@ function render() {
     `;
     card.appendChild(head);
 
-    // Single-row horizontal strip
     const scroll = document.createElement("div");
     scroll.className = "strip-scroll";
 
@@ -457,7 +492,6 @@ function render() {
     scroll.appendChild(strip);
     card.appendChild(scroll);
 
-    // Row actions
     head.querySelector('[data-act="on"]').addEventListener("click", () => {
       for (let i = 0; i < line.length; i++) line[i] = 1;
       saveDB(); render();
@@ -515,7 +549,7 @@ function gotoFrame(i) {
   render();
 }
 
-// ---------- Top bar ----------
+// ---------- Delay ----------
 delayInput.addEventListener("input", () => {
   const v = parseFloat(delayInput.value);
   delayValue = isNaN(v) || v < 0 ? 0 : v;
@@ -525,40 +559,77 @@ delayUnitEl.addEventListener("change", () => {
   delayUnit = delayUnitEl.value;
   saveDB();
 });
-
 function delayInMs() {
   if (delayUnit === "s") return Math.round(delayValue * 1000);
   return Math.round(delayValue);
 }
 
-// ---------- Send ----------
+// ---------- Send ONLY the selected frame ----------
 async function sendToEsp() {
   if (!ip) { setStatus("No device IP configured.", "err"); return; }
-  if (frames.length === 0) { setStatus("No frames to send.", "err"); return; }
+  if (!frames[currentFrame]) { setStatus("No frame selected.", "err"); return; }
 
   const ms = delayInMs();
+  const frame = frames[currentFrame];
 
-  const payload = {
+  const payload = JSON.stringify({
     delay: ms,
-    frames: frames.map(frame => ({
-      delay: ms,
-      lines: frame.map(line => line.join(""))
-    }))
-  };
+    lines: frame.map(line => line.join(""))
+  });
 
-  setStatus("Sending " + frames.length + " frame(s)...");
+  setStatus(`Sending frame ${currentFrame + 1} (${frame.length} line(s))...`);
   try {
     const res = await fetch(`http://${ip}/frames`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      headers: { "Content-Type": "text/plain" },   // <-- avoids CORS preflight
+      body: payload
     });
-    if (!res.ok) throw new Error("HTTP " + res.status);
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error("HTTP " + res.status + " " + errText);
+    }
     const data = await res.json();
-    setStatus(`Sent! ${data.frames} frame(s) • delay ${ms} ms`, "ok");
+    setStatus(`Sent frame ${currentFrame + 1} • ${data.lines} line(s) • delay ${ms} ms`, "ok");
+    setOnline(true);
   } catch (e) {
     setStatus("Send failed: " + e.message, "err");
+    setOnline(false);
   }
+}
+
+// ---------- Stop ----------
+async function stopEsp() {
+  if (!ip) { setStatus("No device IP configured.", "err"); return; }
+  setStatus("Stopping...");
+  try {
+    const res = await fetch(`http://${ip}/stop`);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    setStatus("Stopped. All LEDs off.", "ok");
+    setOnline(true);
+  } catch (e) {
+    setStatus("Stop failed: " + e.message, "err");
+    setOnline(false);
+  }
+}
+
+// ---------- Online bulb ----------
+let online = false;
+function setOnline(v) {
+  if (online === v) return;
+  online = v;
+  bulb.classList.toggle("online", v);
+  bulb.classList.toggle("offline", !v);
+  onlineText.textContent = v ? "Online" : "Offline";
+}
+async function pingDevice() {
+  if (!ip) { setOnline(false); onlineText.textContent = "No IP"; return; }
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 2500);
+    const res = await fetch(`http://${ip}/ping`, { signal: ctrl.signal, cache: "no-store" });
+    clearTimeout(t);
+    setOnline(res.ok);
+  } catch { setOnline(false); }
 }
 
 // ---------- Buttons ----------
@@ -569,6 +640,7 @@ document.getElementById("addLineBtn").addEventListener("click", () => {
 });
 
 document.getElementById("sendBtn").addEventListener("click", sendToEsp);
+document.getElementById("stopBtn").addEventListener("click", stopEsp);
 
 document.getElementById("addFrameBtn").addEventListener("click", () => {
   frames.push(newFrame());
@@ -692,6 +764,10 @@ fileInput.addEventListener("change", () => {
 
   saveDB();
   render();
+
+  // Start online check
+  pingDevice();
+  setInterval(pingDevice, 5000);
 })();
 </script>
 </body>

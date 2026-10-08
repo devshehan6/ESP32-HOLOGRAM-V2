@@ -372,17 +372,39 @@ function applyState(state) {
 }
 
 // ---------- Send ----------
+// ---------- Send current switch state as a 1ms single-line frame ----------
+// Uses /frames so ESP plays it as a frame (which also stops any running pattern).
 let sendInFlight = false;
 async function sendCurrentState() {
   if (!ip) return;
   if (sendInFlight) return;
   sendInFlight = true;
+
+  // Build 16-bit value from the switches
   const value = buildValue();
+
+  // Convert to a 16-char binary string (MSB first).
+  // ESP parses bit strings left-to-right, first char = highest bit.
+  const bits = (value >>> 0).toString(2).padStart(16, "0");
+
+  // Payload: 1 line, delay 1 ms
+  const payload = JSON.stringify({
+    delay: 1,
+    lines: [bits]
+  });
+
   try {
-    const res = await fetch(`http://${ip}/set?value=${value}`);
-    if (!res.ok) throw new Error("HTTP " + res.status);
+    const res = await fetch(`http://${ip}/frames`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },   // no CORS preflight
+      body: payload
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error("HTTP " + res.status + " " + t);
+    }
     const data = await res.json();
-    setStatus(`Sent ${value} • device state = ${data.state}`, "ok");
+    setStatus(`Sent ${value} • lines=${data.lines} • delay=${data.delay}ms`, "ok");
     setOnline(true);
   } catch (e) {
     setStatus("Send failed: " + e.message, "err");
