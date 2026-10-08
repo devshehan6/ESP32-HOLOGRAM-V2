@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Frame Editor</title>
+<style>
+  :root {
+    --bg: #0f1220;
+    --panel: #171a2b;
+    --card: #0e1122;
+    --accent: #4f8cff;
+    --accent-2: #22c55e;
+    --text: #e7e9f3;
+    --muted: #9aa0b4;
+    --danger: #ef4444;
+    --border: #2a3050;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(900px 500px at 50% -10%, #1b2140 0%, var(--bg) 60%);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  /* ---------- Fixed top bar: delay ---------- */
+  .topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 20;
+    background: linear-gradient(to bottom, rgba(15,18,32,.98), rgba(15,18,32,.9));
+    border-bottom: 1px solid var(--border);
+    padding: 10px 12px calc(10px + env(safe-area-inset-top));
+    backdrop-filter: blur(8px);
+  }
+  .topbar-inner {
+    max-width: 1100px; margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .topbar label { font-size: .8rem; color: var(--muted); }
+  .topbar input[type="number"] {
+    width: 120px;
+    padding: 8px 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: ui-monospace, monospace;
+    font-size: .95rem;
+  }
+  .topbar select {
+    padding: 8px 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: .9rem;
+  }
+  .topbar .hint { color: var(--muted); font-size: .72rem; }
+
+  /* ---------- Content ---------- */
+  .wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 90px 12px 190px;
+  }
+
+  .frame-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  .frame-title h2 { margin: 0; font-size: 1rem; }
+  .frame-title .meta { font-size: .75rem; color: var(--muted); }
+
+  .lines {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .line-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px;
+  }
+
+  .line-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .line-head .idx {
+    font-size: .8rem;
+    color: var(--muted);
+    font-family: ui-monospace, monospace;
+  }
+  .line-head .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    padding: 5px 9px;
+    border-radius: 8px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .72rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .chip:active { color: var(--text); }
+  .chip.danger {
+    background: #3a1f24;
+    border-color: #5b2a33;
+    color: #ff9aa6;
+  }
+
+  /* ---------- Single-row horizontal LED strip ---------- */
+  .strip-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 6px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .strip-scroll::-webkit-scrollbar { height: 6px; }
+  .strip-scroll::-webkit-scrollbar-thumb { background: #2a3050; border-radius: 999px; }
+
+  .strip {
+    display: flex;
+    gap: 4px;
+    width: max-content;
+    padding: 2px;
+  }
+
+  .bit {
+    flex: 0 0 auto;
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: .62rem;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+    transition: background .15s, color .15s, border-color .15s, box-shadow .15s;
+  }
+  .bit .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #333852;
+    transition: background .15s, box-shadow .15s;
+  }
+  .bit .n {
+    font-family: ui-monospace, monospace;
+    font-size: .58rem;
+    opacity: .8;
+  }
+  .bit.on {
+    background: linear-gradient(180deg, #23c55e, #17964a);
+    color: #fff;
+    border-color: #23c55e;
+    box-shadow: 0 4px 12px rgba(34,197,94,.35);
+  }
+  .bit.on .dot {
+    background: #fff;
+    box-shadow: 0 0 6px rgba(255,255,255,.9);
+  }
+  .bit:active { transform: scale(.95); }
+
+  .line-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .empty {
+    text-align: center;
+    padding: 40px 10px;
+    color: var(--muted);
+    font-size: .9rem;
+  }
+
+  /* ---------- Fixed bottom bar ---------- */
+  .bottombar {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 20;
+    background: linear-gradient(to top, rgba(15,18,32,.99), rgba(15,18,32,.9));
+    border-top: 1px solid var(--border);
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    backdrop-filter: blur(8px);
+  }
+  .bottombar-inner {
+    max-width: 1100px; margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .pager button {
+    min-width: 34px;
+    height: 34px;
+    padding: 0 8px;
+    border-radius: 8px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: .82rem;
+    cursor: pointer;
+  }
+  .pager button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 700;
+  }
+  .pager button:disabled { opacity: .4; cursor: not-allowed; }
+
+  .actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .btn {
+    padding: 9px 12px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    font-size: .8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter .15s;
+  }
+  .btn:hover { filter: brightness(1.1); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.success { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+  .btn.danger  { background: #b13a3a; border-color: #b13a3a; color: #fff; }
+
+  .status {
+    text-align: center;
+    font-size: .76rem;
+    color: var(--muted);
+    min-height: 1.1em;
+  }
+  .status.ok { color: var(--accent-2); }
+  .status.err { color: var(--danger); }
+
+  input[type="file"] { display: none; }
+</style>
+</head>
+<body>
+
+  <!-- Fixed top: delay -->
+  <div class="topbar">
+    <div class="topbar-inner">
+      <label for="delayInput">Delay</label>
+      <input id="delayInput" type="number" min="0" step="any" value="100" />
+      <select id="delayUnit">
+        <option value="ms" selected>milliseconds</option>
+        <option value="s">seconds</option>
+      </select>
+      <span class="hint">(sent to ESP as ms)</span>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="frame-title">
+      <h2 id="frameTitle">Frame 1</h2>
+      <div class="meta">
+        LEDs: <b id="ledCountOut">0</b> •
+        Lines: <b id="lineCountOut">0</b> •
+        Frames: <b id="frameCountOut">0</b>
+      </div>
+    </div>
+
+    <div class="lines" id="linesContainer"></div>
+
+    <div class="line-actions">
+      <button class="chip" id="addLineBtn">+ Add Line</button>
+    </div>
+  </div>
+
+  <!-- Fixed bottom -->
+  <div class="bottombar">
+    <div class="bottombar-inner">
+      <div class="pager" id="pager"></div>
+
+      <div class="actions">
+        <button class="btn primary" id="sendBtn">Send</button>
+        <button class="btn" id="exportBtn">Export</button>
+        <button class="btn" id="importBtn">Import</button>
+        <button class="btn" id="addFrameBtn">Add Frame</button>
+        <button class="btn" id="addFrameOldBtn">Add Frame + Old Data</button>
+        <button class="btn" id="removeFrameBtn">Remove Frame</button>
+        <button class="btn" id="cleanFrameBtn">Clean Frame</button>
+        <button class="btn danger" id="deleteAllBtn">Delete All Frames</button>
+      </div>
+
+      <div class="status" id="status"></div>
+    </div>
+  </div>
+
+  <input type="file" id="fileInput" accept="application/json,.json" />
+
+<script>
+// ---------- Keys ----------
+const IP_KEY       = "shiftReg_deviceIP";
+const LED_KEY      = "shiftReg_ledCount";
+const DB_KEY       = "shiftReg_frameDB";
+
+// ---------- State ----------
+let ledCount = 0;
+let delayValue = 100;
+let delayUnit = "ms";        // "ms" | "s"
+let frames = [];             // [ [ [0/1,...], ... ], ... ]
+let currentFrame = 0;
+
+const ip = localStorage.getItem(IP_KEY) || "";
+
+// ---------- DOM ----------
+const delayInput   = document.getElementById("delayInput");
+const delayUnitEl  = document.getElementById("delayUnit");
+const linesBox     = document.getElementById("linesContainer");
+const frameTitle   = document.getElementById("frameTitle");
+const ledCountOut  = document.getElementById("ledCountOut");
+const lineCountOut = document.getElementById("lineCountOut");
+const frameCountOut= document.getElementById("frameCountOut");
+const pager        = document.getElementById("pager");
+const statusEl     = document.getElementById("status");
+const fileInput    = document.getElementById("fileInput");
+
+function setStatus(msg, cls = "") {
+  statusEl.textContent = msg;
+  statusEl.className = "status " + cls;
+}
+
+// ---------- LED count from URL / storage ----------
+function getLedCount() {
+  const params = new URLSearchParams(location.search);
+  const url = parseInt(params.get("leds") || "", 10);
+  if (!isNaN(url) && url > 0) return url;
+
+  const saved = parseInt(localStorage.getItem(LED_KEY) || "", 10);
+  if (!isNaN(saved) && saved > 0) return saved;
+
+  return 8;
+}
+
+// ---------- Persistence ----------
+function saveDB() {
+  const db = {
+    delayValue: delayValue,
+    delayUnit: delayUnit,
+    ledCount: ledCount,
+    currentFrame: currentFrame,
+    frames: frames
+  };
+  localStorage.setItem(DB_KEY, JSON.stringify(db));
+}
+
+function loadDB() {
+  const raw = localStorage.getItem(DB_KEY);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+// ---------- Helpers ----------
+function newLine() { return new Array(ledCount).fill(0); }
+function newFrame() { return [ newLine() ]; }
+
+function setFrameTitle() {
+  frameTitle.textContent = `Frame ${currentFrame + 1}`;
+  frameCountOut.textContent = frames.length;
+  lineCountOut.textContent = frames[currentFrame] ? frames[currentFrame].length : 0;
+  ledCountOut.textContent = ledCount;
+}
+
+// ---------- Render ----------
+function render() {
+  linesBox.innerHTML = "";
+
+  if (!frames[currentFrame]) {
+    linesBox.innerHTML = '<div class="empty">No frames. Click "Add Frame".</div>';
+    setFrameTitle();
+    renderPager();
+    return;
+  }
+
+  const frame = frames[currentFrame];
+
+  frame.forEach((line, li) => {
+    const card = document.createElement("div");
+    card.className = "line-card";
+
+    // Header with index + row actions
+    const head = document.createElement("div");
+    head.className = "line-head";
+    head.innerHTML = `
+      <span class="idx">L${li + 1}</span>
+      <span class="acts">
+        <span class="chip" data-act="on">All On</span>
+        <span class="chip" data-act="off">All Off</span>
+        <span class="chip" data-act="add">Add Line</span>
+        <span class="chip danger" data-act="del">Delete</span>
+      </span>
+    `;
+    card.appendChild(head);
+
+    // Single-row horizontal strip
+    const scroll = document.createElement("div");
+    scroll.className = "strip-scroll";
+
+    const strip = document.createElement("div");
+    strip.className = "strip";
+
+    line.forEach((v, bi) => {
+      const b = document.createElement("div");
+      b.className = "bit" + (v ? " on" : "");
+      b.innerHTML = `<span class="dot"></span><span class="n">${bi + 1}</span>`;
+      b.addEventListener("click", () => {
+        line[bi] = line[bi] ? 0 : 1;
+        b.classList.toggle("on", !!line[bi]);
+        saveDB();
+      });
+      strip.appendChild(b);
+    });
+
+    scroll.appendChild(strip);
+    card.appendChild(scroll);
+
+    // Row actions
+    head.querySelector('[data-act="on"]').addEventListener("click", () => {
+      for (let i = 0; i < line.length; i++) line[i] = 1;
+      saveDB(); render();
+    });
+    head.querySelector('[data-act="off"]').addEventListener("click", () => {
+      for (let i = 0; i < line.length; i++) line[i] = 0;
+      saveDB(); render();
+    });
+    head.querySelector('[data-act="add"]').addEventListener("click", () => {
+      frame.splice(li + 1, 0, newLine());
+      saveDB(); render();
+    });
+    head.querySelector('[data-act="del"]').addEventListener("click", () => {
+      if (frame.length <= 1) { setStatus("At least one line required.", "err"); return; }
+      frame.splice(li, 1);
+      saveDB(); render();
+    });
+
+    linesBox.appendChild(card);
+  });
+
+  setFrameTitle();
+  renderPager();
+}
+
+// ---------- Pagination ----------
+function renderPager() {
+  pager.innerHTML = "";
+  if (frames.length === 0) return;
+
+  const mkBtn = (label, onClick, opts = {}) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (opts.active) b.classList.add("active");
+    if (opts.disabled) b.disabled = true;
+    b.addEventListener("click", onClick);
+    pager.appendChild(b);
+  };
+
+  mkBtn("<<", () => gotoFrame(0),                { disabled: currentFrame === 0 });
+  mkBtn("<",  () => gotoFrame(currentFrame - 1), { disabled: currentFrame === 0 });
+
+  frames.forEach((_, i) => {
+    mkBtn(String(i + 1), () => gotoFrame(i), { active: i === currentFrame });
+  });
+
+  mkBtn(">",  () => gotoFrame(currentFrame + 1), { disabled: currentFrame >= frames.length - 1 });
+  mkBtn(">>", () => gotoFrame(frames.length - 1), { disabled: currentFrame >= frames.length - 1 });
+}
+
+function gotoFrame(i) {
+  if (i < 0 || i >= frames.length) return;
+  currentFrame = i;
+  saveDB();
+  render();
+}
+
+// ---------- Top bar ----------
+delayInput.addEventListener("input", () => {
+  const v = parseFloat(delayInput.value);
+  delayValue = isNaN(v) || v < 0 ? 0 : v;
+  saveDB();
+});
+delayUnitEl.addEventListener("change", () => {
+  delayUnit = delayUnitEl.value;
+  saveDB();
+});
+
+function delayInMs() {
+  if (delayUnit === "s") return Math.round(delayValue * 1000);
+  return Math.round(delayValue);
+}
+
+// ---------- Send ----------
+async function sendToEsp() {
+  if (!ip) { setStatus("No device IP configured.", "err"); return; }
+  if (frames.length === 0) { setStatus("No frames to send.", "err"); return; }
+
+  const ms = delayInMs();
+
+  const payload = {
+    delay: ms,
+    frames: frames.map(frame => ({
+      delay: ms,
+      lines: frame.map(line => line.join(""))
+    }))
+  };
+
+  setStatus("Sending " + frames.length + " frame(s)...");
+  try {
+    const res = await fetch(`http://${ip}/frames`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    setStatus(`Sent! ${data.frames} frame(s) • delay ${ms} ms`, "ok");
+  } catch (e) {
+    setStatus("Send failed: " + e.message, "err");
+  }
+}
+
+// ---------- Buttons ----------
+document.getElementById("addLineBtn").addEventListener("click", () => {
+  if (!frames[currentFrame]) return;
+  frames[currentFrame].push(newLine());
+  saveDB(); render();
+});
+
+document.getElementById("sendBtn").addEventListener("click", sendToEsp);
+
+document.getElementById("addFrameBtn").addEventListener("click", () => {
+  frames.push(newFrame());
+  currentFrame = frames.length - 1;
+  saveDB(); render();
+});
+
+document.getElementById("addFrameOldBtn").addEventListener("click", () => {
+  if (!frames[currentFrame]) { frames.push(newFrame()); currentFrame = 0; }
+  else {
+    const copy = frames[currentFrame].map(line => line.slice());
+    frames.push(copy);
+    currentFrame = frames.length - 1;
+  }
+  saveDB(); render();
+});
+
+document.getElementById("removeFrameBtn").addEventListener("click", () => {
+  if (frames.length <= 1) { setStatus("At least one frame required.", "err"); return; }
+  frames.splice(currentFrame, 1);
+  if (currentFrame >= frames.length) currentFrame = frames.length - 1;
+  saveDB(); render();
+});
+
+document.getElementById("cleanFrameBtn").addEventListener("click", () => {
+  if (!frames[currentFrame]) return;
+  frames[currentFrame] = frames[currentFrame].map(() => newLine());
+  saveDB(); render();
+  setStatus("Frame cleaned.", "ok");
+});
+
+document.getElementById("deleteAllBtn").addEventListener("click", () => {
+  if (!confirm("Delete ALL frames?")) return;
+  frames = [ newFrame() ];
+  currentFrame = 0;
+  saveDB(); render();
+  setStatus("All frames deleted.", "ok");
+});
+
+// ---------- Export ----------
+document.getElementById("exportBtn").addEventListener("click", () => {
+  const db = {
+    delayValue: delayValue,
+    delayUnit: delayUnit,
+    ledCount: ledCount,
+    currentFrame: currentFrame,
+    frames: frames
+  };
+  const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `frames_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  setStatus("Exported.", "ok");
+});
+
+// ---------- Import ----------
+document.getElementById("importBtn").addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const db = JSON.parse(reader.result);
+      if (!db || !Array.isArray(db.frames)) throw new Error("Invalid file");
+
+      db.frames = db.frames.map(frame =>
+        frame.map(line => {
+          const out = new Array(ledCount).fill(0);
+          for (let i = 0; i < ledCount; i++) out[i] = line[i] ? 1 : 0;
+          return out;
+        })
+      );
+
+      frames = db.frames.length ? db.frames : [ newFrame() ];
+      currentFrame = Math.min(Math.max(0, db.currentFrame || 0), frames.length - 1);
+      delayValue = typeof db.delayValue === "number" ? db.delayValue : delayValue;
+      delayUnit = db.delayUnit === "s" ? "s" : "ms";
+
+      delayInput.value = delayValue;
+      delayUnitEl.value = delayUnit;
+
+      saveDB(); render();
+      setStatus("Imported.", "ok");
+    } catch (e) {
+      setStatus("Import failed: " + e.message, "err");
+    }
+  };
+  reader.readAsText(file);
+  fileInput.value = "";
+});
+
+// ---------- Init ----------
+(function init() {
+  ledCount = getLedCount();
+
+  const db = loadDB();
+  if (db && Array.isArray(db.frames) && db.frames.length) {
+    frames = db.frames.map(frame =>
+      frame.map(line => {
+        const out = new Array(ledCount).fill(0);
+        for (let i = 0; i < ledCount; i++) out[i] = line[i] ? 1 : 0;
+        return out;
+      })
+    );
+    currentFrame = Math.min(Math.max(0, db.currentFrame || 0), frames.length - 1);
+    delayValue = typeof db.delayValue === "number" ? db.delayValue : 100;
+    delayUnit = db.delayUnit === "s" ? "s" : "ms";
+  } else {
+    frames = [ newFrame() ];
+    currentFrame = 0;
+    delayValue = 100;
+    delayUnit = "ms";
+  }
+
+  delayInput.value = delayValue;
+  delayUnitEl.value = delayUnit;
+
+  saveDB();
+  render();
+})();
+</script>
+</body>
+</html>

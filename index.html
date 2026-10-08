@@ -111,16 +111,8 @@ function setStatus(msg, cls = "") {
   statusEl.className = "status " + cls;
 }
 
-// ---------- Default IP detection ----------
-function getDefaultIP() {
-  const saved = localStorage.getItem(IP_KEY);
-  if (saved) return saved;
-  const host = window.location.hostname;
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return host;
-  if (host && host !== "localhost") return host;
-  return "192.168.4.1";
-}
-ipInput.value = getDefaultIP();
+// ---------- Load saved IP only (no auto-detect) ----------
+ipInput.value = localStorage.getItem(IP_KEY) || "";
 
 // ---------- Connect ----------
 async function tryConnect() {
@@ -133,7 +125,7 @@ async function tryConnect() {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 4000);
-    const res = await fetch(`http://${ip}/ping`, { signal: ctrl.signal });
+    const res = await fetch(`http://${ip}/ping`, { signal: ctrl.signal, cache: "no-store" });
     clearTimeout(t);
     if (!res.ok) throw new Error("HTTP " + res.status);
 
