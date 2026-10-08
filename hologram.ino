@@ -1,77 +1,95 @@
 #include <WiFi.h>
 #include <WebServer.h>
-#include <LittleFS.h>
 
-// ===== WiFi Credentials =====
-const char* ssid     = "DESKTOP-5J8MM72 4221_";
-const char* password = "11111113";
+// ---------- WiFi Credentials ----------
+const char* WIFI_SSID = "DESKTOP-5J8MM72 4221_";
+const char* WIFI_PASS = "11111113";
 
-// ===== Web Server on port 80 =====
-WebServer server(80);
+// ---------- 74HC595 Pins ----------
+#define DATA_PIN   0    // DS  - Pin 14 on 74HC595
+#define CLOCK_PIN  1    // SHCP - Pin 11 on 74HC595
+#define LATCH_PIN  2    // STCP - Pin 12 on 74HC595
 
-// ===== Handle Root Page (index.html) =====
-void handleRoot() {
-  File file = LittleFS.open("/index.html", "r");
-  if (!file) {
-    server.send(500, "text/plain", "index.html not found in LittleFS");
+// ---------- Server ----------
+WebServer server(80); // <-- මේක තමයි fix එක
+
+// Current 16-bit output state
+uint16_t currentState = 0x0000;
+
+// ---------- Send 16-bit data to cascaded shift registers ----------
+void writeShiftRegister(uint16_t data) {
+  digitalWrite(LATCH_PIN, LOW);
+  shiftOut(DATA_PIN, CLOCK_PIN, MSBFIRST, (data >> 8) & 0xFF);
+  shiftOut(DATA_PIN, CLOCK_PIN, MSBFIRST, data & 0xFF);
+  digitalWrite(LATCH_PIN, HIGH);
+  currentState = data;
+}
+
+// ---------- CORS headers ----------
+void sendCORSHeaders() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
+void handleStatus() {
+  sendCORSHeaders();
+  String json = "{\"state\":" + String(currentState) + "}";
+  server.send(200, "application/json", json);
+}
+
+void handleSet() {
+  sendCORSHeaders();
+  if (!server.hasArg("value")) {
+    server.send(400, "application/json", "{\"error\":\"missing value\"}");
     return;
   }
-  server.streamFile(file, "text/html");
-  file.close();
+  long v = server.arg("value").toInt();
+  if (v < 0) v = 0;
+  if (v > 65535) v = 65535;
+  writeShiftRegister((uint16_t)v);
+  Serial.print("Set state -> ");
+  Serial.println(v);
+  String json = "{\"state\":" + String(currentState) + "}";
+  server.send(200, "application/json", json);
 }
 
-// ===== Handle Text from HTML (via POST) =====
-void handleText() {
-  if (server.hasArg("plain")) {
-    String receivedText = server.arg("plain");
-    
-    Serial.println("========== RECEIVED FROM HTML ==========");
-    Serial.print("Text: ");
-    Serial.println(receivedText);
-    Serial.println("========================================");
-    
-    server.send(200, "text/plain", "OK: " + receivedText);
-  } else {
-    server.send(400, "text/plain", "No data received");
-  }
-}
-
-// ===== 404 Handler =====
-void handleNotFound() {
-  server.send(404, "text/plain", "404: Not Found");
+void handleOptions() {
+  sendCORSHeaders();
+  server.send(204);
 }
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
-  Serial.println("\n\n=== ESP32 Hologram Project Starting ===");
+  delay(100);
 
-  // Mount LittleFS
-  if (!LittleFS.begin(true)) {
-    Serial.println("LittleFS Mount Failed!");
-    return;
-  }
-  Serial.println("LittleFS Mounted Successfully");
+  pinMode(DATA_PIN, OUTPUT);
+  pinMode(CLOCK_PIN, OUTPUT);
+  pinMode(LATCH_PIN, OUTPUT);
+  writeShiftRegister(0x0000);
 
-  // Connect to WiFi
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
+  Serial.println();
+  Serial.print("Connecting to WiFi: ");
+  Serial.println(WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nWiFi Connected!");
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
-  Serial.println("Open this IP in your browser to see hologram control page");
 
-  // Routes
-  server.on("/", HTTP_GET, handleRoot);
-  server.on("/send", HTTP_POST, handleText);
-  server.onNotFound(handleNotFound);
+  Serial.println();
+  Serial.print("Connected! Device IP: ");
+  Serial.println(WiFi.localIP());
+
+  server.on("/status", HTTP_GET, handleStatus);
+  server.on("/set",    HTTP_GET, handleSet);
+  server.on("/set",    HTTP_OPTIONS, handleOptions);
+  server.on("/status", HTTP_OPTIONS, handleOptions);
 
   server.begin();
-  Serial.println("HTTP Server Started");
+  Serial.println("HTTP server started on port 80");
 }
 
 void loop() {

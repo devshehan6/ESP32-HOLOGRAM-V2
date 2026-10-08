@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LED Shift Register Control</title>
+<style>
+  :root {
+    --bg: #0f1220;
+    --panel: #171a2b;
+    --accent: #4f8cff;
+    --accent-2: #22c55e;
+    --text: #e7e9f3;
+    --muted: #9aa0b4;
+    --danger: #ef4444;
+    --switch-off: #333852;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1200px 600px at 20% -10%, #1b2140 0%, var(--bg) 60%);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    width: 100%;
+    max-width: 720px;
+    background: var(--panel);
+    border: 1px solid #262b45;
+    border-radius: 18px;
+    padding: 24px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.45);
+  }
+  h1 {
+    margin: 0 0 4px;
+    font-size: 1.4rem;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: .9rem;
+    margin-bottom: 20px;
+  }
+  .row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  label { font-size: .85rem; color: var(--muted); }
+  input[type="text"] {
+    flex: 1;
+    min-width: 200px;
+    padding: 10px 12px;
+    background: #0e1122;
+    border: 1px solid #2a3050;
+    border-radius: 10px;
+    color: var(--text);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  button {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter .15s;
+  }
+  button:hover { filter: brightness(1.1); }
+  button.secondary { background: #2a3050; }
+  button.success { background: var(--accent-2); }
+
+  .status {
+    margin-top: 12px;
+    font-size: .85rem;
+    color: var(--muted);
+    min-height: 1.2em;
+  }
+  .status.ok { color: var(--accent-2); }
+  .status.err { color: var(--danger); }
+
+  hr {
+    border: none;
+    border-top: 1px solid #262b45;
+    margin: 20px 0;
+  }
+
+  /* Switch grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  @media (max-width: 520px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  .switch-item {
+    background: #0e1122;
+    border: 1px solid #2a3050;
+    border-radius: 12px;
+    padding: 14px;
+    text-align: center;
+  }
+  .switch-item .num {
+    font-size: .8rem;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 54px;
+    height: 30px;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: var(--switch-off);
+    border-radius: 999px;
+    transition: .25s;
+  }
+  .slider::before {
+    content: "";
+    position: absolute;
+    height: 22px;
+    width: 22px;
+    left: 4px;
+    top: 4px;
+    background: #e7e9f3;
+    border-radius: 50%;
+    transition: .25s;
+  }
+  input:checked + .slider {
+    background: var(--accent-2);
+  }
+  input:checked + .slider::before {
+    transform: translateX(24px);
+  }
+
+  .actions {
+    margin-top: 20px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .actions button { flex: 1; min-width: 120px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>LED Shift Register Control</h1>
+    <div class="subtitle">16 LEDs • 2 × 74HC595 • Control 8 outputs via switch bank</div>
+
+    <!-- IP selection -->
+    <div class="row">
+      <label for="ipInput">Device IP:</label>
+      <input id="ipInput" type="text" placeholder="e.g. 192.168.1.42" />
+      <button id="connectBtn" class="secondary">Connect</button>
+    </div>
+    <div id="status" class="status">Not connected</div>
+
+    <hr />
+
+    <!-- 8 switches -->
+    <div class="grid" id="switchGrid"></div>
+
+    <div class="actions">
+      <button id="sendBtn" class="success">Send</button>
+      <button id="allOffBtn" class="secondary">All Off</button>
+      <button id="allOnBtn" class="secondary">All On</button>
+    </div>
+  </div>
+
+<script>
+// ---------- Config ----------
+const IP_STORAGE_KEY = "shiftReg_deviceIP";
+const NUM_SWITCHES = 8;
+
+// ---------- Elements ----------
+const ipInput   = document.getElementById("ipInput");
+const connectBtn= document.getElementById("connectBtn");
+const statusEl  = document.getElementById("status");
+const grid      = document.getElementById("switchGrid");
+const sendBtn   = document.getElementById("sendBtn");
+const allOffBtn = document.getElementById("allOffBtn");
+const allOnBtn  = document.getElementById("allOnBtn");
+
+// ---------- Build switches ----------
+const switches = [];
+for (let i = 0; i < NUM_SWITCHES; i++) {
+  const item = document.createElement("div");
+  item.className = "switch-item";
+  item.innerHTML = `
+    <div class="num">LED ${i + 1}</div>
+    <label class="switch">
+      <input type="checkbox" data-index="${i}" />
+      <span class="slider"></span>
+    </label>
+  `;
+  grid.appendChild(item);
+  switches.push(item.querySelector("input"));
+}
+
+// ---------- Status helper ----------
+function setStatus(msg, cls = "") {
+  statusEl.textContent = msg;
+  statusEl.className = "status " + cls;
+}
+
+// ---------- Auto-detect default IP ----------
+// If the page is opened from a file:// or GitHub Pages, use saved IP.
+// If opened from an IP/hostname (e.g. served by the device itself), use it.
+function getDefaultIP() {
+  const saved = localStorage.getItem(IP_STORAGE_KEY);
+  if (saved) return saved;
+
+  const host = window.location.hostname;
+  // Only use hostname if it looks like an IP or a LAN host
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return host;
+  if (host && host !== "localhost" && host !== "") return host;
+
+  // Fallback common ESP default
+  return "192.168.4.1";
+}
+
+ipInput.value = getDefaultIP();
+
+// ---------- Connect button ----------
+connectBtn.addEventListener("click", async () => {
+  const ip = ipInput.value.trim();
+  if (!ip) {
+    setStatus("Please enter a valid IP address.", "err");
+    return;
+  }
+  setStatus("Connecting to " + ip + " ...");
+  try {
+    const res = await fetch(`http://${ip}/status`, { method: "GET" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    localStorage.setItem(IP_STORAGE_KEY, ip);
+    setStatus(`Connected to ${ip} • current state = ${data.state}`, "ok");
+
+    // Apply returned state back to switches
+    for (let i = 0; i < NUM_SWITCHES; i++) {
+      switches[i].checked = ((data.state >> i) & 1) === 1;
+    }
+  } catch (e) {
+    setStatus("Connection failed: " + e.message, "err");
+  }
+});
+
+// ---------- Compute 16-bit value from switches ----------
+// Switches map to the low 8 bits of the 16-bit register (LEDs 0-7).
+// LEDs 8-15 remain off (change mapping here if needed).
+function buildValue() {
+  let value = 0;
+  for (let i = 0; i < NUM_SWITCHES; i++) {
+    if (switches[i].checked) value |= (1 << i);
+  }
+  return value;
+}
+
+// ---------- Send to device ----------
+async function sendState(value) {
+  const ip = ipInput.value.trim();
+  if (!ip) {
+    setStatus("No IP configured.", "err");
+    return;
+  }
+  try {
+    const res = await fetch(`http://${ip}/set?value=${value}`, { method: "GET" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    setStatus(`Sent ${value} • device state = ${data.state}`, "ok");
+  } catch (e) {
+    setStatus("Send failed: " + e.message, "err");
+  }
+}
+
+sendBtn.addEventListener("click", () => sendState(buildValue()));
+
+allOffBtn.addEventListener("click", () => {
+  switches.forEach(s => s.checked = false);
+  sendState(0);
+});
+
+allOnBtn.addEventListener("click", () => {
+  switches.forEach(s => s.checked = true);
+  sendState(buildValue());
+});
+</script>
+</body>
+</html>
