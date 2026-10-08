@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Control Panel • LED Controller</title>
+<style>
+  :root {
+    --bg: #0f1220;
+    --panel: #171a2b;
+    --card: #0e1122;
+    --accent: #4f8cff;
+    --accent-2: #22c55e;
+    --text: #e7e9f3;
+    --muted: #9aa0b4;
+    --danger: #ef4444;
+    --switch-off: #333852;
+    --border: #2a3050;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1200px 600px at 20% -10%, #1b2140 0%, var(--bg) 60%);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px 16px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+
+  /* Top bar */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .topbar h1 { margin: 0; font-size: 1.25rem; }
+  .topbar .ip { color: var(--muted); font-size: .82rem; font-family: ui-monospace, monospace; }
+
+  .pills { display: flex; gap: 10px; flex-wrap: wrap; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    font-size: .85rem;
+    user-select: none;
+    cursor: pointer;
+    transition: border-color .2s;
+  }
+  .pill.active { border-color: var(--accent); }
+
+  /* Online bulb */
+  .bulb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #555;
+    box-shadow: 0 0 0 0 rgba(0,0,0,0);
+    transition: background .2s, box-shadow .2s;
+  }
+  .bulb.online { background: var(--accent-2); box-shadow: 0 0 10px 2px rgba(34,197,94,.55); }
+  .bulb.offline { background: var(--danger); box-shadow: 0 0 10px 2px rgba(239,68,68,.45); }
+
+  /* Live switch (mini toggle in pill) */
+  .mini-switch {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    background: var(--switch-off);
+    border-radius: 999px;
+    transition: background .25s;
+    flex: 0 0 auto;
+  }
+  .mini-switch::before {
+    content: "";
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: #e7e9f3;
+    transition: transform .25s;
+  }
+  .pill.live-on .mini-switch { background: var(--accent-2); }
+  .pill.live-on .mini-switch::before { transform: translateX(16px); }
+
+  /* Cards */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px;
+    margin-bottom: 16px;
+  }
+  .row-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .row-title {
+    font-size: .95rem;
+    font-weight: 600;
+  }
+  .row-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row-actions .mini-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    font-size: .78rem;
+    cursor: pointer;
+    color: var(--muted);
+    user-select: none;
+  }
+  .row-actions .mini-pill:hover { color: var(--text); }
+
+  .remove-btn {
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: #3a1f24;
+    border: 1px solid #5b2a33;
+    color: #ff9aa6;
+    font-size: .78rem;
+    cursor: pointer;
+  }
+  .remove-btn:hover { filter: brightness(1.15); }
+
+  /* Switch grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  @media (max-width: 520px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+
+  .switch-item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    text-align: center;
+  }
+  .switch-item .num { font-size: .78rem; color: var(--muted); margin-bottom: 8px; }
+
+  .switch { position: relative; display: inline-block; width: 52px; height: 28px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: var(--switch-off);
+    border-radius: 999px;
+    transition: .25s;
+  }
+  .slider::before {
+    content: "";
+    position: absolute;
+    height: 20px; width: 20px;
+    left: 4px; top: 4px;
+    background: #e7e9f3;
+    border-radius: 50%;
+    transition: .25s;
+  }
+  input:checked + .slider { background: var(--accent-2); }
+  input:checked + .slider::before { transform: translateX(24px); }
+
+  /* Bottom actions */
+  .bottom-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+  .btn {
+    padding: 12px 18px;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: .92rem;
+    transition: filter .15s;
+    color: white;
+  }
+  .btn:hover { filter: brightness(1.1); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); flex: 1; min-width: 160px; }
+  .btn.success { background: var(--accent-2); }
+  .btn.secondary { background: #2a3050; }
+  .btn.danger { background: #b13a3a; }
+
+  .status {
+    margin-top: 12px;
+    font-size: .82rem;
+    color: var(--muted);
+    min-height: 1.2em;
+  }
+  .status.ok { color: var(--accent-2); }
+  .status.err { color: var(--danger); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Top bar -->
+    <div class="topbar">
+      <div>
+        <h1>LED Control Panel</h1>
+        <div class="ip" id="ipLabel">—</div>
+      </div>
+      <div class="pills">
+        <div class="pill" id="onlinePill" title="Device online status">
+          <span class="bulb" id="bulb"></span>
+          <span id="onlineText">Checking…</span>
+        </div>
+        <div class="pill" id="livePill" title="When ON, changes are sent instantly">
+          <span>Live</span>
+          <span class="mini-switch"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rows container -->
+    <div id="rowsContainer"></div>
+
+    <!-- Add row -->
+    <div class="bottom-actions">
+      <button class="btn secondary" id="addRowBtn">+ Add Row</button>
+    </div>
+
+    <!-- Global actions -->
+    <div class="card" style="margin-top:16px;">
+      <div class="row-head">
+        <div class="row-title">Global Controls</div>
+      </div>
+      <div class="bottom-actions">
+        <button class="btn success" id="allOnBtn">All On</button>
+        <button class="btn danger" id="allOffBtn">All Off</button>
+        <button class="btn primary" id="sendBtn">Send</button>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+  </div>
+
+<script>
+// ---------- Constants ----------
+const IP_KEY = "shiftReg_deviceIP";
+const SWITCHES_PER_ROW = 8;
+const MAX_BITS = 16; // ESP only drives 16 bits
+
+// ---------- Elements ----------
+const ipLabel     = document.getElementById("ipLabel");
+const bulb        = document.getElementById("bulb");
+const onlineText  = document.getElementById("onlineText");
+const onlinePill  = document.getElementById("onlinePill");
+const livePill    = document.getElementById("livePill");
+const rowsContainer = document.getElementById("rowsContainer");
+const addRowBtn   = document.getElementById("addRowBtn");
+const allOnBtn    = document.getElementById("allOnBtn");
+const allOffBtn   = document.getElementById("allOffBtn");
+const sendBtn     = document.getElementById("sendBtn");
+const statusEl    = document.getElementById("status");
+
+// ---------- State ----------
+const ip = localStorage.getItem(IP_KEY) || "";
+let liveMode = false;
+let rows = []; // array of { el, switches: [checkbox,...] }
+
+ipLabel.textContent = ip ? `Device: ${ip}` : "No device IP configured";
+
+if (!ip) {
+  setStatus("No device IP. Please go back and connect first.", "err");
+}
+
+// ---------- Status helper ----------
+function setStatus(msg, cls = "") {
+  statusEl.textContent = msg;
+  statusEl.className = "status " + cls;
+}
+
+// ---------- Build a row ----------
+function createRow() {
+  const rowEl = document.createElement("div");
+  rowEl.className = "card";
+
+  const rowIndex = rows.length;
+
+  rowEl.innerHTML = `
+    <div class="row-head">
+      <div class="row-title">Row ${rowIndex + 1}</div>
+      <div class="row-actions">
+        <div class="mini-pill" data-action="row-on">All On</div>
+        <div class="mini-pill" data-action="row-off">All Off</div>
+        <button class="remove-btn" data-action="remove">Remove</button>
+      </div>
+    </div>
+    <div class="grid"></div>
+  `;
+
+  const grid = rowEl.querySelector(".grid");
+  const switches = [];
+  for (let i = 0; i < SWITCHES_PER_ROW; i++) {
+    const item = document.createElement("div");
+    item.className = "switch-item";
+    item.innerHTML = `
+      <div class="num">LED ${i + 1}</div>
+      <label class="switch">
+        <input type="checkbox" data-index="${i}" />
+        <span class="slider"></span>
+      </label>
+    `;
+    const input = item.querySelector("input");
+    input.addEventListener("change", () => {
+      if (liveMode) sendCurrentState();
+    });
+    grid.appendChild(item);
+    switches.push(input);
+  }
+
+  // Row actions
+  rowEl.querySelector('[data-action="row-on"]').addEventListener("click", () => {
+    switches.forEach(s => s.checked = true);
+    if (liveMode) sendCurrentState();
+  });
+  rowEl.querySelector('[data-action="row-off"]').addEventListener("click", () => {
+    switches.forEach(s => s.checked = false);
+    if (liveMode) sendCurrentState();
+  });
+  rowEl.querySelector('[data-action="remove"]').addEventListener("click", () => {
+    rowEl.remove();
+    rows = rows.filter(r => r.el !== rowEl);
+    refreshRowTitles();
+    if (liveMode) sendCurrentState();
+  });
+
+  rowsContainer.appendChild(rowEl);
+  rows.push({ el: rowEl, switches });
+  refreshRowTitles();
+}
+
+function refreshRowTitles() {
+  rows.forEach((r, i) => {
+    const t = r.el.querySelector(".row-title");
+    if (t) t.textContent = `Row ${i + 1}`;
+  });
+}
+
+// ---------- Compute 16-bit value from all rows ----------
+// Bit b = row[floor(b/8)].switches[b%8]
+function buildValue() {
+  let value = 0;
+  for (let r = 0; r < rows.length; r++) {
+    for (let i = 0; i < SWITCHES_PER_ROW; i++) {
+      const bit = r * SWITCHES_PER_ROW + i;
+      if (bit >= MAX_BITS) continue;
+      if (rows[r].switches[i].checked) value |= (1 << bit);
+    }
+  }
+  return value >>> 0;
+}
+
+// ---------- Apply state from device to switches ----------
+function applyState(state) {
+  for (let r = 0; r < rows.length; r++) {
+    for (let i = 0; i < SWITCHES_PER_ROW; i++) {
+      const bit = r * SWITCHES_PER_ROW + i;
+      if (bit >= MAX_BITS) continue;
+      rows[r].switches[i].checked = ((state >> bit) & 1) === 1;
+    }
+  }
+}
+
+// ---------- Send current state ----------
+let sendInFlight = false;
+async function sendCurrentState() {
+  if (!ip) return;
+  if (sendInFlight) return; // avoid flooding the board
+  sendInFlight = true;
+  const value = buildValue();
+  try {
+    const res = await fetch(`http://${ip}/set?value=${value}`);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    setStatus(`Sent ${value} • device state = ${data.state}`, "ok");
+    setOnline(true);
+  } catch (e) {
+    setStatus("Send failed: " + e.message, "err");
+    setOnline(false);
+  } finally {
+    sendInFlight = false;
+  }
+}
+
+// ---------- Online/offline bulb (light polling) ----------
+let online = false;
+function setOnline(v) {
+  if (online === v) return;
+  online = v;
+  bulb.classList.toggle("online", v);
+  bulb.classList.toggle("offline", !v);
+  onlineText.textContent = v ? "Online" : "Offline";
+}
+
+async function pingDevice() {
+  if (!ip) { setOnline(false); return; }
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 2500);
+    const res = await fetch(`http://${ip}/ping`, { signal: ctrl.signal, cache: "no-store" });
+    clearTimeout(t);
+    setOnline(res.ok);
+  } catch {
+    setOnline(false);
+  }
+}
+
+// ---------- Live switch ----------
+function setLiveMode(on) {
+  liveMode = on;
+  livePill.classList.toggle("live-on", on);
+  livePill.classList.toggle("active", on);
+  sendBtn.disabled = on;
+}
+
+livePill.addEventListener("click", () => setLiveMode(!liveMode));
+
+// ---------- Global buttons ----------
+addRowBtn.addEventListener("click", createRow);
+
+allOnBtn.addEventListener("click", () => {
+  rows.forEach(r => r.switches.forEach(s => s.checked = true));
+  if (liveMode) sendCurrentState();
+});
+
+allOffBtn.addEventListener("click", () => {
+  rows.forEach(r => r.switches.forEach(s => s.checked = false));
+  if (liveMode) sendCurrentState();
+});
+
+sendBtn.addEventListener("click", () => sendCurrentState());
+
+// ---------- Init ----------
+// Two default rows
+createRow();
+createRow();
+
+// Initial load: read status then start pinging
+(async () => {
+  if (ip) {
+    try {
+      const res = await fetch(`http://${ip}/status`);
+      if (res.ok) {
+        const data = await res.json();
+        applyState(data.state);
+        setOnline(true);
+      }
+    } catch { setOnline(false); }
+  }
+  setInterval(pingDevice, 5000); // one ping every 5 s (very light)
+})();
+</script>
+</body>
+</html>

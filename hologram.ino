@@ -11,7 +11,7 @@ const char* WIFI_PASS = "11111113";
 #define LATCH_PIN  2    // STCP - Pin 12 on 74HC595
 
 // ---------- Server ----------
-WebServer server(80); // <-- මේක තමයි fix එක
+WebServer server(80);
 
 // Current 16-bit output state
 uint16_t currentState = 0x0000;
@@ -25,19 +25,27 @@ void writeShiftRegister(uint16_t data) {
   currentState = data;
 }
 
-// ---------- CORS headers ----------
+// ---------- CORS ----------
 void sendCORSHeaders() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
+// ---------- /ping : lightweight connectivity check ----------
+void handlePing() {
+  sendCORSHeaders();
+  server.send(200, "application/json", "{\"ok\":1}");
+}
+
+// ---------- /status ----------
 void handleStatus() {
   sendCORSHeaders();
   String json = "{\"state\":" + String(currentState) + "}";
   server.send(200, "application/json", json);
 }
 
+// ---------- /set?value=NNNN ----------
 void handleSet() {
   sendCORSHeaders();
   if (!server.hasArg("value")) {
@@ -83,10 +91,12 @@ void setup() {
   Serial.print("Connected! Device IP: ");
   Serial.println(WiFi.localIP());
 
-  server.on("/status", HTTP_GET, handleStatus);
-  server.on("/set",    HTTP_GET, handleSet);
-  server.on("/set",    HTTP_OPTIONS, handleOptions);
+  server.on("/ping",   HTTP_GET,     handlePing);
+  server.on("/status", HTTP_GET,     handleStatus);
+  server.on("/set",    HTTP_GET,     handleSet);
+  server.on("/ping",   HTTP_OPTIONS, handleOptions);
   server.on("/status", HTTP_OPTIONS, handleOptions);
+  server.on("/set",    HTTP_OPTIONS, handleOptions);
 
   server.begin();
   Serial.println("HTTP server started on port 80");
